@@ -2,12 +2,18 @@
 import annotation.tailrec
 import com.google.caliper.Param
 
+
+//using spark build-in json4s-jackson
+import org.json4s._
+import org.json4s.jackson.JsonMethods._
+import org.json4s.JsonDSL._
+
 class Benchmark extends ScalaBenchmark {
   
   // to make your benchmark depend on one or more values, create fields with the name you want
   // the parameter to be known by, and add this annotation (see @Param javadocs for more details)
   // caliper will inject the respective value at runtime and make sure to run all combinations 
-  @Param(Array("10", "100", "1000", "10000"))
+  @Param(Array("10", "100", "1000"))
   val length: Int = 0
   
   var array: Array[Int] = _
@@ -22,27 +28,33 @@ class Benchmark extends ScalaBenchmark {
   // the body of the method simply executes the code we wish to measure, 'reps' times
   // you can use the 'repeat' from the SimpleBenchmark to repeat with relatively low overhead
   // however, if your code  is fast you want to implement the reps loop directly with 'while'
-  def timeForeach(reps: Int) = repeat(reps) {
+  def timeScalaNative(reps: Int) = repeat(reps) {
     //////////////////// CODE SNIPPET ONE ////////////////////
     
-    var result = 0    
-    array.foreach {
-      result += _
+    val jsonStr = Source.fromURL("http://json-urls").mkString
+    val newJson = parse(jsonStr) flatMap { json =>
+      implicit lazy val formats = org.json4s.DefaultFormats
+      val df = new java.text.SimpleDateFormat("yyyy-MM")
+      val datum = (json \ "data").extract[Seq[Map[String, org.json4s.JsonAST.JValue]]]
+      datum map { data =>                 //for (each .data[] in json)
+        var new_data = immutable.Map(data.toSeq: _*)//does not work with MUTABLE!!!!
+        new_data = new_data - "_id"                 //  remove _id, add date
+        new_data = new_data updated ("date", df.format(ad_stat("end_timestamp").extract[Long]*1000))
+        new_data = new_data updated ("end_timestamp", ad_stat("end_timestamp").extract[Long]*1000)
+        new_data = new_data updated ("start_timestamp", ad_stat("start_timestamp").extract[Long]*1000)
+        compact(render(new_data))
+      }
     }
-    result // always have your snippet return a value that cannot easily be "optimized away"
     
+    newJson
     //////////////////////////////////////////////////////////
   }
   
   // a second benchmarking code snippet
-  def timeTFor(reps: Int) = repeat(reps) {
+  def timeExternalTools(reps: Int) = repeat(reps) {
     //////////////////// CODE SNIPPET TWO ////////////////////
-    
-    var result = 0
-    tfor(0)(_ < array.length, _ + 1) { i =>
-      result += array(i)
-    }
-    result
+    new URL("http://json-urls").#>(new File("ins.json")).!
+    "cat campaigns-all.json".#|(Seq("jq", "-c", ".campaigns[] | del(._id)")).#>(new File("out.json")).!!
     
     //////////////////////////////////////////////////////////
   }
@@ -50,15 +62,7 @@ class Benchmark extends ScalaBenchmark {
   // and a third benchmarking code snippet
   def timeWhile(reps: Int) = repeat(reps) {
     //////////////////// CODE SNIPPET THREE ////////////////////
-    
-    var result = 0
-    var i = 0
-    while (i < array.length) {
-      result += array(i)
-      i = i + 1 
-    }
-    result
-    
+    //TODO smth else?
     //////////////////////////////////////////////////////////
   }
 
